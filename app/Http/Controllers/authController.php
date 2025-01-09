@@ -1,108 +1,93 @@
 <?php
 
-namespace App\Http\Controllers\api;
+namespace App\Http\Controllers;
 
-use App\Http\Controllers\Controller;
-use Illuminate\Http\Request;
-use Validator;
 use App\Models\User;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Auth;  // Import Auth to handle authentication
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Auth;
 
-class authController extends Controller
+class AuthController extends Controller
 {
-    /**
-     * User Registration.
-     */
     public function register(Request $request)
     {
-        $validator = Validator::make($request->all(), [
-            'fname' => 'required|string|max:255',
-            'lname' => 'required|string|max:255',
-            'gender' => 'required|in:male,female',
-            'birthdate' => 'required|date',
-            'address' => 'required|string|max:500',
-            'contactnum' => 'required|string|max:15',
-            'email' => 'required|email|unique:users,email',
-            'role' => 'required|in:admin,user',
-            'password' => 'required|confirmed|min:6',
-            'imgf' => 'nullable|image|mimes:jpeg,png,jpg|max:2048',
-            'imgb' => 'nullable|image|mimes:jpeg,png,jpg|max:2048',
-        ]);
 
-        if ($validator->fails()) {
-            return response()->json([
-                'status' => 'false',
-                'message' => 'Validation errors occurred',
-                'errors' => $validator->errors(),
-            ]);
-        }
+        Log::info('Registration attempt with data:', $request->all());
 
         try {
-            $imageFrontPath = null;
-            $imageBackPath = null;
-
-            if ($request->hasFile('imgf')) {
-                $imageFrontPath = $request->file('imgf')->store('images', 'public');
-            }
-
-            if ($request->hasFile('imgb')) {
-                $imageBackPath = $request->file('imgb')->store('images', 'public');
-            }
+            $validatedData = $request->validate([
+                'name' => 'required|string|max:255',
+                'email' => 'required|string|email|max:255|unique:users',
+                'password' => 'required|string|min:1',
+            ]);
 
             $user = User::create([
-                'fname' => $request->fname,
-                'lname' => $request->lname,
-                'gender' => $request->gender,
-                'birthdate' => $request->birthdate,
-                'address' => $request->address,
-                'contactnum' => $request->contactnum,
-                'email' => $request->email,
-                'role' => $request->role,
-                'imgf' => $imageFrontPath,
-                'imgb' => $imageBackPath,
-                'password' => Hash::make($request->password),
+                'name' => $validatedData['name'],
+                'email' => $validatedData['email'],
+                'password' => Hash::make($validatedData['password'])
             ]);
 
+            Log::info('User created successfully:', ['user_id' => $user->id]);
+
             return response()->json([
-                'status' => 'true',
-                'message' => 'User Registered Successfully!',
-                'data' => $user->createToken('register_token')->plainTextToken
-            ]);
+                'message' => 'Registration successful',
+                'user' => $user
+            ], 201);
+
         } catch (\Exception $e) {
+            Log::error('Registration error: ' . $e->getMessage());
+
             return response()->json([
-                'status' => 'false',
-                'message' => 'An error occurred while processing your request',
-                'error' => $e->getMessage(),
-            ]);
+                'message' => 'Registration failed',
+                'error' => $e->getMessage()
+            ], 500);
         }
     }
 
-    /**
-     * User Login.
-     */
     public function login(Request $request)
     {
-        // Validate the input
-        $credentials = $request->only('email', 'password');
-    
-        // Attempt to authenticate the user
-        if (Auth::attempt($credentials)) {
-            $user = Auth::user();
-            $token = $user->createToken('login_token')->plainTextToken;
-    
-            return response()->json([
-                'status' => 'true',
-                'message' => 'Login successful!',
-                'token' => $token,
-                'user' => $user,
+        Log::info('Login attempt for email: ' . $request->email);
+
+        try {
+            $credentials = $request->validate([
+                'email' => 'required|email',
+                'password' => 'required'
             ]);
-        } else {
+
+
+            $user = User::where('email', $credentials['email'])->first();
+
+            if (!$user) {
+                Log::warning('Login failed - user not found: ' . $request->email);
+                return response()->json([
+                    'message' => 'User not found'
+                ], 401);
+            }
+
+
+            if (!Hash::check($credentials['password'], $user->password)) {
+                Log::warning('Login failed - invalid password for: ' . $request->email);
+                return response()->json([
+                    'message' => 'Invalid password'
+                ], 401);
+            }
+
+
+            Auth::login($user);
+            Log::info('Login successful for user: ' . $user->email);
+
             return response()->json([
-                'status' => 'false',
-                'message' => 'Invalid credentials',
-            ], 401);
+                'message' => 'Login successful',
+                'user' => $user
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Login error: ' . $e->getMessage());
+
+            return response()->json([
+                'message' => 'Login error: ' . $e->getMessage()
+            ], 500);
         }
     }
-    
 }
